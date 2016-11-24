@@ -41,7 +41,7 @@ int main() {
 		INTERRUPT_PRU0_VRING);
 
 	// Clear the interrupt status to start clean
-	PRU_INTC.SICR = INTERRUPT_PRU0_KICK;
+	PRU_INTC.SICR = INTERRUPT_PRU_KICK;
 
 	// Create a channel
 	while( rpmsg_channel(RPMSG_NS_CREATE, &transport, CHAN_NAME, CHAN_DESC, CHAN_PORT) != RPMSG_SUCCESS ) {}
@@ -53,7 +53,7 @@ int main() {
 	while(1) {
 		if (read_r31() & PRU_INT_HOST0) { // Host interrupt received, process:
 			// Clear the interrupt flag
-			PRU_INTC.SICR = INTERRUPT_PRU0_KICK;
+			PRU_INTC.SICR = INTERRUPT_PRU_KICK;
 
 			unsigned int src, dst, len;
 			// Receive message(s)

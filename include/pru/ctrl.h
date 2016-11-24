@@ -43,7 +43,7 @@ struct __PRU_CTRL_REGS {
 #define PRU_1_CTRL (*((struct __PRU_CTRL_REGS *)__PRU_PRU1_CTRL_REGS_BASE))
 
 #if defined __AM335X_PRU0__
-#define PRU_THIS_CTRL (*((struct __PRU_CTRL_REGS *)__PRU_PRU0_CTRL_REGS_BASE))
+#define PRU_THIS_CTRL PRU_0_CTRL
 #elif defined __AM335X_PRU1__
-#define PRU_THIS_CTRL (*((struct __PRU_CTRL_REGS *)__PRU_PRU1_CTRL_REGS_BASE))
+#define PRU_THIS_CTRL PRU_1_CTRL
 #endif
