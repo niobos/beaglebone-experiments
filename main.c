@@ -46,7 +46,6 @@ int main() {
 	// Create a channel
 	while( rpmsg_channel(RPMSG_NS_CREATE, &transport, CHAN_NAME, CHAN_DESC, CHAN_PORT) != RPMSG_SUCCESS ) {}
 
-	timer_init();
 	timer_arm(0, 200000000, 200000000); // 1 second
 
 	// Main event loop
