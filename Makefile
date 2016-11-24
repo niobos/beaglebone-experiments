@@ -6,3 +6,9 @@
 
 %.bin: %.elf
 	pru-objcopy -O binary -j .text $< $@
+
+%.0.elf: %.c
+	pru-gcc -g -Os -Wall -Wextra -minrt -mmcu=am335x.pru0 -I include $< -o $@
+
+%.1.elf: %.c
+	pru-gcc -g -Os -Wall -Wextra -minrt -mmcu=am335x.pru1 -I include $< -o $@
