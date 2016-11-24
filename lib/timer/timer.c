@@ -60,12 +60,17 @@ void timer_arm(
 	unsigned int timeout,
 	unsigned int interval
 ) {
-	unsigned int now = PRU_THIS_CTRL.CYCLECOUNT;
-	timers[timer_number].expire = now + timeout;
+	timer_tick();
+
+	timers[timer_number].expire = timeout;
+	/* This should actually be now+timeout, with `now` being sampled as early
+	 * as possible in this function.
+	 * Since timer_tick() resets CYCLECOUNT to 0, using now=0 is a good
+	 * aproximation. A more accurate count is probably now=-12, but
+	 * we need to be careful to avoid underflowing and getting a huge value */
+
 	timers[timer_number].interval = interval;
 	timers[timer_number].expired_count = 0;
-
-	timer_tick();
 }
 
 unsigned int timer_expired(unsigned int timer_number) {
