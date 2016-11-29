@@ -1,0 +1,92 @@
+@startuml
+
+skinparam stateBackgroundColor<<Once>> #ADD1B2
+
+state Idle
+state StartHoldOff
+state HoldOff
+
+state Rx {
+	state RxStartBit <<Once>>
+	RxStartBit : arm timer for 0.5+N*1 bit times
+	RxStartBit --> RxWaitForNextBit
+
+	RxWaitForNextBit : monitor timer
+	RxWaitForNextBit --> RxBit : timer expired
+
+	state RxBit <<Once>>
+	RxBit : receive 1+8+1+1 bits
+	RxBit --> RxByte : 11 bits received
+	RxBit --> RxWaitForNextBit : < 11 bits received
+
+	state RxByte <<Once>>
+	RxByte : Check startbit, parity, stopbit
+	RxByte --> StartHoldOff : Framing OK
+	RxByte --> RxInvalidFraming : Framing invalid
+
+	state RxInvalidFraming <<Once>>
+	RxInvalidFraming : reset Rx buffer
+	RxInvalidFraming --> StartHoldOff
+}
+
+state Tx {
+	state TxStart <<Once>>
+	TxStart : arm timer for 0.5+N*0.5 bit times
+	TxStart --> TxFindNextBit
+
+	state TxFindNextBit <<Once>>
+	TxFindNextBit : find next bit to Tx
+	TxFindNextBit --> TxCompleted : all bits sent
+	TxFindNextBit --> TxBit : bits remaining
+
+	state TxBit <<Once>>
+	TxBit : Set output to bit value
+	TxBit --> TxWaitForHalfBit
+
+	TxWaitForHalfBit : monitor timer
+	TxWaitForHalfBit --> TxMonitorBit : timer expired
+
+	state TxMonitorBit <<Once>>
+	TxMonitorBit : Verify input == output
+	TxMonitorBit --> TxWaitForFullBit : match
+	TxMonitorBit --> TxArbitrated : mismatch
+
+	state TxArbitrated <<Once>>
+	TxArbitrated: Change timer expire +0.5 bit times
+	TxArbitrated: Change timer interval to 1 bit times
+	TxArbitrated: Copy Tx state to Rx state
+	TxArbitrated: Reset Tx state to restart
+	TxArbitrated --> RxWaitForNextBit : <11 bits received
+	TxArbitrated --> RxByte : 11 bits received\n\
+		(unlikely, we'd be arbitrated on the stopbit)
+
+	TxWaitForFullBit : monitor timer
+	TxWaitForFullBit -u-> TxFindNextBit : timer expired
+
+	state TxCompleted <<Once>>
+	TxCompleted : reset Tx buffer
+	TxCompleted --> StartHoldOff
+}
+
+' Idle needs to be defined after the Rx/Tx composite state,
+' otherwise the StartBitReceived gets rendered outside of the composite state
+
+Idle : Monitor input for low
+Idle --> RxStartBit : Input Low
+Idle : Monitor Tx buffer
+Idle --> TxStart : Tx buffer filled
+
+state StartHoldOff <<Once>>
+StartHoldOff : arm timer for 10 bit times
+StartHoldOff --> HoldOff
+
+HoldOff : Monitor input for low
+HoldOff --> RxStartBit : Input Low
+HoldOff : Monitor timer
+HoldOff --> EndOfMessage : timer expired
+
+state EndOfMessage <<Once>>
+EndOfMessage : if Rx buffer: send & reset Rx buffer to ARM
+EndOfMessage -u-> Idle
+
+@enduml
