@@ -73,10 +73,26 @@ void timer_arm(
 	timers[timer_number].expired_count = 0;
 }
 
+void modify_timer_timeout(unsigned int timer_number, unsigned int timeout_add) {
+	timer_tick();
+	timers[timer_number].expire += timeout_add;
+}
+
+void modify_timer_interval(unsigned int timer_number, unsigned int new_interval) {
+	timer_tick();
+	timers[timer_number].interval = new_interval;
+}
+
 unsigned int timer_expired(unsigned int timer_number) {
 	timer_tick();
 
 	unsigned int e = timers[timer_number].expired_count;
 	timers[timer_number].expired_count = 0;
 	return e;
+}
+
+void timer_add_expired(unsigned int timer_number, unsigned int expired_count) {
+	timer_tick();
+
+	timers[timer_number].expired_count += expired_count;
 }
