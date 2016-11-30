@@ -49,6 +49,11 @@ struct rpmsg_transport {
 #define RPMSG_INVALID_HEAD        0xffffff02
 #define RPMSG_SUCCESS             0
 
+struct scatter {
+	void          *data;
+	unsigned int  len;
+};
+
 unsigned int rpmsg_init(
 	struct rpmsg_transport *transport,
 	struct fw_rsc_vdev_vring *vring_pru_to_arm,
@@ -70,6 +75,13 @@ unsigned int rpmsg_send (
 	unsigned int            dst,
 	void                    *data,
 	unsigned int            len
+);
+unsigned int rpmsg_send_gather (
+	struct rpmsg_transport  *transport,
+	unsigned int            src,
+	unsigned int            dst,
+	struct scatter          data[],
+	unsigned int            count
 );
 
 unsigned int rpmsg_receive (

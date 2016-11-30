@@ -129,7 +129,25 @@ unsigned int rpmsg_send (
 	void                    *data,
 	unsigned int            len
 ) {
-	if(len > (RPMSG_BUF_SIZE - sizeof(struct rpmsg_hdr))) {
+	struct scatter s;
+	s.data = data;
+	s.len = len;
+	return rpmsg_send_gather(transport, src, dst, &s, 1);
+}
+
+unsigned int rpmsg_send_gather (
+	struct rpmsg_transport  *transport,
+	unsigned int            src,
+	unsigned int            dst,
+	struct scatter          data[],
+	unsigned int            count
+) {
+	unsigned int total_len = 0;
+	for(unsigned int i=0; i < count; i++) {
+		total_len += data[i].len;
+	}
+
+	if(total_len > (RPMSG_BUF_SIZE - sizeof(struct rpmsg_hdr))) {
 		return RPMSG_BUFFER_TOO_SMALL;
 	}
 
@@ -145,12 +163,16 @@ unsigned int rpmsg_send (
 	}
 
 	/* Copy local data buffer to the descriptor buffer address */
-	memcpy(msg->data, data, len);
-	msg->len = len;
 	msg->dst = dst;
 	msg->src = src;
 	msg->flags = 0;
 	msg->reserved = 0;
+	void *p = msg->data;
+	for(unsigned int i=0; i < count; i++) {
+		memcpy(p, data[i].data, data[i].len);
+		p += data[i].len;
+	}
+	msg->len = total_len;
 
 	/* Add the used buffer */
 	if(virtqueue_add_used_buf(virtqueue, head, msg_len) >= 0xffffff00) {

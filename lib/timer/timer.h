@@ -9,7 +9,7 @@ void timer_tick();
 /* Arm a timer to expire in <timeout> cycles, and every <interval> cycles
  * after that.
  */
-void timer_arm(unsigned int timer_number, unsigned int timeout, unsigned int interval=0);
+void timer_arm(unsigned int timer_number, unsigned int timeout, unsigned int interval);
 
 /* Modify a running timer
  * Either add a number of cycles to the timeout, or change the interval for the
