@@ -21,8 +21,7 @@ state Rx {
 
 	state RxByte <<Once>>
 	RxByte : Check startbit, parity, stopbit
-	RxByte --> StartHoldOff : Framing OK
-	RxByte --> RxInvalidFraming : Framing invalid
+	RxByte --> StartHoldOff
 
 	state RxInvalidFraming <<Once>>
 	RxInvalidFraming : reset Rx buffer
@@ -32,14 +31,11 @@ state Rx {
 state Tx {
 	state TxStart <<Once>>
 	TxStart : arm timer for 0.5+N*0.5 bit times
-	TxStart --> TxFindNextBit
-
-	state TxFindNextBit <<Once>>
-	TxFindNextBit : find next bit to Tx
-	TxFindNextBit --> TxCompleted : all bits sent
-	TxFindNextBit --> TxBit : bits remaining
+	TxStart --> TxBit
 
 	state TxBit <<Once>>
+	TxBit : find next bit to TX
+	TxBit --> TxCompleted : all bits sent
 	TxBit : Set output to bit value
 	TxBit --> TxWaitForHalfBit
 
@@ -61,7 +57,7 @@ state Tx {
 		(unlikely, we'd be arbitrated on the stopbit)
 
 	TxWaitForFullBit : monitor timer
-	TxWaitForFullBit -u-> TxFindNextBit : timer expired
+	TxWaitForFullBit -u-> TxBit : timer expired
 
 	state TxCompleted <<Once>>
 	TxCompleted : reset Tx buffer
@@ -75,6 +71,8 @@ Idle : Monitor input for low
 Idle --> RxStartBit : Input Low
 Idle : Monitor Tx buffer
 Idle --> TxStart : Tx buffer filled
+Idle : Monitor RpMsg for new messages
+Idle --> Idle : New RpMsg : copy to Tx buffer
 
 state StartHoldOff <<Once>>
 StartHoldOff : arm timer for 10 bit times

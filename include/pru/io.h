@@ -9,6 +9,24 @@ static inline void write_r30(unsigned int val) {
 	);
 }
 
+static inline void write_r30_set_bit(unsigned int bit) {
+	asm volatile (
+			"SET r30, r30, %[bit]\n\t"
+			: /* outputs */
+			: /* inputs */ [bit]"r"(bit)
+			: /* clobber */
+	);
+}
+
+static inline void write_r30_clr_bit(unsigned int bit) {
+	asm volatile (
+			"SET r30, r30, %[bit]\n\t"
+			: /* outputs */
+			: /* inputs */ [bit]"r"(bit)
+			: /* clobber */
+	);
+}
+
 static inline unsigned int read_r30() {
 	unsigned int val;
 	asm volatile (
