@@ -11,6 +11,11 @@ void timer_tick();
  */
 void timer_arm(unsigned int timer_number, unsigned int timeout, unsigned int interval);
 
+/* Disable a timer. This saves processing cycles when a timer is no longer
+ * needed
+ */
+void timer_disable(unsigned int timer_number);
+
 /* Modify a running timer
  * Either add a number of cycles to the timeout, or change the interval for the
  * next iteration.

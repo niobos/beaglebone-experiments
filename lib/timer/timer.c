@@ -73,6 +73,12 @@ void timer_arm(
 	timers[timer_number].expired_count = 0;
 }
 
+void timer_disable(
+	unsigned int timer_number
+) {
+	timers[timer_number].interval = 0;
+}
+
 void modify_timer_timeout(unsigned int timer_number, unsigned int timeout_add) {
 	timer_tick();
 	timers[timer_number].expire += timeout_add;

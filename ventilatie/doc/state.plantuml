@@ -1,0 +1,75 @@
+@startuml
+
+skinparam stateBackgroundColor<<Once>> #ADD1B2
+
+state SendStart <<Once>>
+SendStart : Tx(low)
+SendStart : arm timer for 500µs
+
+SendStart --> WaitForStartEnd
+
+WaitForStartEnd : monitor timer
+
+WaitForStartEnd --> StartEnd : timer expired
+
+state StartEnd <<once>>
+StartEnd : Tx(Hi-Z)
+StartEnd : arm timer for 40µs+10%
+StartEnd --> WaitForSensorResponse
+
+WaitForSensorResponse : Rx()
+WaitForSensorResponse : monitor timer
+WaitForSensorResponse --> Failed : timer expired
+WaitForSensorResponse --> SensorResponseStart : Rx low
+
+state SensorResponseStart <<Once>>
+SensorResponseStart : arm timer for 80µs+10%
+SensorResponseStart --> WaitForSensorResponseEnd
+
+WaitForSensorResponseEnd : Rx()
+WaitForSensorResponseEnd : monitor timer
+WaitForSensorResponseEnd --> Failed : timer expired
+WaitForSensorResponseEnd --> FirstBit : Rx high
+
+state FirstBit <<Once>>
+FirstBit : arm timer for 80µs+10%
+FirstBit --> WaitForBit
+
+WaitForBit : Rx()
+WaitForBit : monitor timer
+WaitForBit --> Failed : timer expired
+WaitForBit --> BitStart : Rx low
+
+state BitStart <<Once>>
+BitStart : arm timer between 50µs+10%
+BitStart -> WaitForBitRelease
+
+WaitForBitRelease : Rx()
+WaitForBitRelease : monitor timer
+WaitForBitRelease --> Failed : timer expired
+WaitForBitRelease --> StartReadBit0 : Rx high
+WaitForBitRelease --> Success : Rx high & 5*8 bits received
+
+state StartReadBit0 <<Once>>
+StartReadBit0 : arm timer for 50µs (between 27µs & 70µs) + N*20µs
+StartReadBit0 --> ReadBit0
+
+ReadBit0 : Rx()
+ReadBit0 : monitor timer
+ReadBit0 --> RxBit0 : Rx low
+ReadBit0 --> ReadBit1 : timer expired
+
+ReadBit1 : Rx()
+ReadBit1 : monitor timer
+ReadBit1 --> RxBit1 : Rx low
+ReadBit1 --> Failed : timer expired
+
+state RxBit0 <<Once>>
+RxBit0 : store bit value "0"
+RxBit0 --> BitStart
+
+state RxBit1 <<Once>>
+RxBit1 : store bit value "1"
+RxBit1 --> BitStart
+
+@enduml

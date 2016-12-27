@@ -20,7 +20,7 @@ static inline void write_r30_set_bit(unsigned int bit) {
 
 static inline void write_r30_clr_bit(unsigned int bit) {
 	asm volatile (
-			"SET r30, r30, %[bit]\n\t"
+			"CLR r30, r30, %[bit]\n\t"
 			: /* outputs */
 			: /* inputs */ [bit]"r"(bit)
 			: /* clobber */
