@@ -10,16 +10,18 @@
 #include <string.h> // memcpy()
 
 #include "../lib/rpmsg/rpmsg.h"
-#include "../lib/timer/timer.h"
+#include "../lib/time/time.h"
 
 #include "resource_table.h"
 
 #define CHAN_NAME "rpmsg-pru"   // needs to match driver on Linux side
+#define CHAN_NUM 0
 
 struct rpmsg_transport transport;
 
 uint8_t payload[RPMSG_BUF_SIZE];
 
+#define NUM_SENSORS 4
 struct DHT22 {
 	enum dht22_state {
 		DHT22_SendStart = 0,
@@ -31,11 +33,11 @@ struct DHT22 {
 		DHT22_WaitForBitRelease,
 		DHT22_ReadBit0,
 		DHT22_ReadBit1,
-		DHT22_Done = 0xf0,
-		DHT22_Failed = 0xf1
+		DHT22_Done
 	} state;
 	unsigned int rx_bit;
-} DHT22[4];
+	unsigned int timer;
+} DHT22[NUM_SENSORS];
 
 unsigned int map_gpio(unsigned int output) {
 	switch(output) {
@@ -55,19 +57,18 @@ void write_low(unsigned int output) {
 
 void write_hiz(unsigned int output) {
 	unsigned int bit = map_gpio(output);
-	GPIO2.SETDATAOUT = bit;
+	//GPIO2.SETDATAOUT = bit;
 	GPIO2.OE |= bit;
 }
 
 unsigned int read_input(unsigned int input) {
 	unsigned int bit = map_gpio(input);
-	return !!(GPIO2.DATAIN & bit);
+	return (GPIO2.DATAIN & bit) != 0;
 }
 
-unsigned int toggle;
 void store_next_bit(unsigned int *pointer, void *buf, unsigned int bit_value) {
 	unsigned int b;
-	asm volatile (
+	asm volatile ( // volatile: this block has side effects (changing *buf)
 		"MOV %[b].b1, %[p].b0\n\t"
 		"RSB %[b].b1, %[b].b1, 7\n\t" // most significant bit first, so bit (7-N)
 
@@ -77,10 +78,10 @@ void store_next_bit(unsigned int *pointer, void *buf, unsigned int bit_value) {
 		"SBBO %[b].b0, %[buf], %[p].b1, 1\n\t" // store buf[byte]
 
 		"ADD %[p].b0, %[p].b0, 1\n\t"
-		"QBGT store_next_bit_not_next_byte, %[p].b0, 8\n\t" // 8 > bitnumber
+		"QBGT store_next_bit__not_next_byte, %[p].b0, 8\n\t" // branch if 8 > bitnumber
 		"ADD %[p].b1, %[p].b1, 1\n\t"
 		"LDI %[p].b0, 0\n\t"
-		"store_next_bit_not_next_byte:\n\t"
+		"store_next_bit__not_next_byte:\n\t"
 		: /* output */
 			[p] "+&r" (*pointer),
 			[b] "=&r" (b)
@@ -88,13 +89,8 @@ void store_next_bit(unsigned int *pointer, void *buf, unsigned int bit_value) {
 			[buf] "r" (buf),
 			[v] "r" (bit_value)
 		: /* clobber */
-			"memory"
+			"memory" // *buf is changed
 	);
-	if( toggle ) write_r30_set_bit(14);
-	else write_r30_clr_bit(14);
-	toggle = !toggle;
-	if( bit_value ) write_r30_set_bit(15);
-	else write_r30_clr_bit(15);
 }
 
 void do_measurements() {
@@ -102,50 +98,49 @@ void do_measurements() {
 	memset(DHT22, 0x00, sizeof(DHT22));
 
 	while( ! done ) {
-		done = (DHT22[0].state >= 0xf0) &&
-		       (DHT22[1].state >= 0xf0) &&
-		       (DHT22[2].state >= 0xf0);
+		done = 1;
 
-		for( unsigned int i = 0; i <= 3; i++ ) {
+		for( unsigned int i = 0; i < NUM_SENSORS; i++ ) {
+			done = done && (DHT22[i].state == DHT22_Done);
+
 			switch( DHT22[i].state ) {
 			case DHT22_SendStart:
-				write_r30_set_bit(14);
-				timer_arm(i, CPU_FREQ / 1000000 * 500, 0);
 				write_low(i);
+				DHT22[i].timer = time_get() + CPU_FREQ / 1000000 * 500;
 				DHT22[i].state = DHT22_WaitForStartEnd;
 				break;
 
 			case DHT22_WaitForStartEnd:
-				if( timer_expired(i) ) {
+				if( time_ge(time_get(), DHT22[i].timer) ) {
 					write_hiz(i);
-					timer_arm(i, CPU_FREQ / 1000000 * (40+4), 0);
+					DHT22[i].timer = time_get() + CPU_FREQ / 1000000 * (40+4);
 					DHT22[i].state = DHT22_WaitForSensorResponse;
 				}
 				break;
 
 			case DHT22_WaitForSensorResponse:
-				if( timer_expired(i) ) {
-					DHT22[i].state = DHT22_Failed;
+				if( time_ge(time_get(), DHT22[i].timer) ) {
+					DHT22[i].state |= 0x80;
 				}
 				if( read_input(i) == 0 ) {
-					timer_arm(i, CPU_FREQ / 1000000 * (80+8), 0);
+					DHT22[i].timer = time_get() + CPU_FREQ / 1000000 * (80+8);
 					DHT22[i].state = DHT22_WaitForSensorResponseEnd;
 				}
 				break;
 
 			case DHT22_WaitForSensorResponseEnd:
-				if( timer_expired(i) ) {
-					DHT22[i].state = DHT22_Failed;
+				if( time_ge(time_get(), DHT22[i].timer) ) {
+					DHT22[i].state |= 0x80;
 				}
 				if( read_input(i) == 1 ) {
-					timer_arm(i, CPU_FREQ / 1000000 * (80+8), 0);
+					DHT22[i].timer = time_get() + CPU_FREQ / 1000000 * (80+8);
 					DHT22[i].state = DHT22_WaitForBit;
 				}
 				break;
 
 			case DHT22_WaitForBit:
-				if( timer_expired(i) ) {
-					DHT22[i].state = DHT22_Failed;
+				if( time_ge(time_get(), DHT22[i].timer) ) {
+					DHT22[i].state |= 0x80;
 				}
 				if( read_input(i) == 0 ) {
 					DHT22[i].state = DHT22_BitStart;
@@ -153,28 +148,27 @@ void do_measurements() {
 				break;
 
 			case DHT22_BitStart:
-				timer_arm(i, CPU_FREQ / 1000000 * (50+50), 0);
+				DHT22[i].timer = time_get() + CPU_FREQ / 1000000 * (50+50); // 50µs+10% was not enough is some cases
 				DHT22[i].state = DHT22_WaitForBitRelease;
 				break;
 
 			case DHT22_WaitForBitRelease:
-				if( timer_expired(i) ) {
-					DHT22[i].state = DHT22_Failed;
+				if( time_ge(time_get(), DHT22[i].timer) ) {
+					DHT22[i].state |= 0x80;
 				}
 				if( read_input(i) == 1 ) {
 					if( DHT22[i].rx_bit >= 0x0500 ) {
-						timer_disable(i);
 						DHT22[i].state = DHT22_Done;
-						write_r30_clr_bit(14);
 					} else {
-						timer_arm(i, CPU_FREQ / 1000000 * 50, CPU_FREQ / 1000000 * (20+7));
+						DHT22[i].timer = time_get() + CPU_FREQ / 1000000 * 50; // 50µs is decission point between "0" and "1"
 						DHT22[i].state = DHT22_ReadBit0;
 					}
 				}
 				break;
 
 			case DHT22_ReadBit0:
-				if( timer_expired(i) ) {
+				if( time_ge(time_get(), DHT22[i].timer) ) {
+					DHT22[i].timer += CPU_FREQ / 1000000 * (20+7); // extend timer, don't re-arm
 					DHT22[i].state = DHT22_ReadBit1;
 				}
 				if( read_input(i) == 0 ) {
@@ -184,8 +178,8 @@ void do_measurements() {
 				break;
 
 			case DHT22_ReadBit1:
-				if( timer_expired(i) ) {
-					DHT22[i].state = DHT22_Failed;
+				if( time_ge(time_get(), DHT22[i].timer) ) {
+					DHT22[i].state |= 0x80;
 				}
 				if( read_input(i) == 0 ) {
 					store_next_bit(&DHT22[i].rx_bit, payload + i*5, 1);
@@ -193,14 +187,23 @@ void do_measurements() {
 				}
 				break;
 
-			case DHT22_Failed:
+			default:
 				write_hiz(i);
-				timer_disable(i);
-				*(payload + i*5 + 4) = 0xff;
-				break;
-
+				*(payload + i*5 + 0) = 0xff;
+				*(payload + i*5 + 1) = DHT22[i].state;
+				*(payload + i*5 + 2) = DHT22[i].rx_bit;
+				*(payload + i*5 + 3) = DHT22[i].rx_bit >> 8;
+				*(payload + i*5 + 4) = 0xfe;
+				/* Checksum is guaranteed to fail:
+				 * rx_bit&0xff is <=7; rx_bit>>8 is <= 4
+				 * state is < 0x8a
+				 * Also: humidity of more than 6528.0% should rise suspision
+				 */
+				DHT22[i].state = DHT22_Done;
+				// fall through
 			case DHT22_Done:
 				break;
+
 			}
 		}
 	}
@@ -223,18 +226,25 @@ int main() {
 	rpmsg_init(&transport,
 		&rproc_resource_table.rpmsg_vring_pru_to_arm,
 		&rproc_resource_table.rpmsg_vring_arm_to_pru,
-		INTERRUPT_PRU0_VRING);
+		INTERRUPT_PRU0_VRING
+	);
 
-	while( rpmsg_channel(RPMSG_NS_CREATE, &transport, CHAN_NAME, "environment sensors", 0) != RPMSG_SUCCESS ) {}
+	while( rpmsg_channel(RPMSG_NS_CREATE, &transport, CHAN_NAME, "environment sensors", CHAN_NUM) != RPMSG_SUCCESS ) {}
 
 	// Main event loop
 	while(1) {
 		unsigned int src, dst, len;
 		if(rpmsg_receive(&transport, &src, &dst, payload, &len) == RPMSG_SUCCESS) {
-			memset(payload, 0x00, 4*5);
+			memset(payload, 0x00, NUM_SENSORS*5);
 			do_measurements();
-			rpmsg_send(&transport, dst, src, payload, 4*5);
+			rpmsg_send(&transport, dst, src, payload, NUM_SENSORS*5);
+			__delay_cycles(CPU_FREQ * 2); // Wait 2 seconds before next measurement can be taken
 		}
+		/* Potential BUG
+		 * time_get() might not be called within 21 seconds while waiting for an
+		 * rpmsg.
+		 * This is currently fine, since no timers are actually running
+		 */
 	}
 	__builtin_unreachable();
 }

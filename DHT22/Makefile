@@ -13,5 +13,5 @@
 %.1.elf: %.c
 	pru-gcc -g -Os -Wall -Wextra -minrt -mmcu=am335x.pru1 -I include $< -o $@
 
-0.elf: main.c ../lib/rpmsg/rpmsg.c ../lib/timer/timer.c
+0.elf: main.c ../lib/rpmsg/rpmsg.c ../lib/time/time.c
 	pru-gcc -g -Os -Wall -Wextra -minrt -mmcu=am335x.pru0 -DNUMBER_OF_TIMERS=4 -I ../include $+ -o $@

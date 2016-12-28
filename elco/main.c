@@ -10,7 +10,7 @@
 #include <string.h> // memcpy()
 
 #include "lib/rpmsg/rpmsg.h"
-#include "lib/timer/timer.h"
+#include "lib/time/time.h"
 
 #include "resource_table.h"
 

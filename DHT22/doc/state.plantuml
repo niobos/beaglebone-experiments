@@ -41,7 +41,7 @@ WaitForBit --> Failed : timer expired
 WaitForBit --> BitStart : Rx low
 
 state BitStart <<Once>>
-BitStart : arm timer between 50µs+10%
+BitStart : arm timer for 50µs+100% (10% too little in some cases)
 BitStart -> WaitForBitRelease
 
 WaitForBitRelease : Rx()
@@ -51,13 +51,17 @@ WaitForBitRelease --> StartReadBit0 : Rx high
 WaitForBitRelease --> Success : Rx high & 5*8 bits received
 
 state StartReadBit0 <<Once>>
-StartReadBit0 : arm timer for 50µs (between 27µs & 70µs) + N*20µs
+StartReadBit0 : arm timer for 50µs (between 27µs & 70µs)
 StartReadBit0 --> ReadBit0
 
 ReadBit0 : Rx()
 ReadBit0 : monitor timer
 ReadBit0 --> RxBit0 : Rx low
-ReadBit0 --> ReadBit1 : timer expired
+ReadBit0 --> ReadBit1_rearm : timer expired
+
+state ReadBit1_rearm <<Once>>
+ReadBit1_rearm : extend timer with 20µs+10% of total time => 27µs
+ReadBit1_rearm --> ReadBit1
 
 ReadBit1 : Rx()
 ReadBit1 : monitor timer
