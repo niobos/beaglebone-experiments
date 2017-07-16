@@ -15,3 +15,6 @@
 
 0.elf: main.c ../lib/rpmsg/rpmsg.c ../lib/time/time.c
 	pru-gcc -g -Os -Wall -Wextra -minrt -mmcu=am335x.pru0 -DNUMBER_OF_TIMERS=4 -I ../include $+ -o $@
+
+%-00A0.dtbo: %.dts
+	dtc -O dtb -o "$@" -b 0 -@ "$<"
