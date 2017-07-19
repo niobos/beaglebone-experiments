@@ -1,0 +1,36 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "ti,beaglebone", "ti,beaglebone-black";
+
+	part-number = "DS18B20-IO";
+
+	exclusive-use =
+		"P8.11", "gpio1_13";
+
+	fragment@0 {
+		target = <&am33xx_pinmux>;
+		__overlay__ {
+			ds18b20_pinmux: pinmux_ds18b20 {
+				pinctrl-single,pins = <
+					0x034 0x37 // P8_11 (GPIO1_13): mode 7 (gpio), pull up, Rx enabled
+				>;
+			};
+		};
+	};
+
+	fragment@1 {
+		target = <&ocp>;
+		__overlay__ {
+			onwire@0 {
+				compatible = "w1-gpio";
+				pinctrl-names = "default";
+				pinctrl-0 = <&ds18b20_pinmux>;
+				status = "okay";
+
+				gpios = <&gpio1 13 0>
+			};
+		};
+	};
+};
