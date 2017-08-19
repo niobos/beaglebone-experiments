@@ -60,6 +60,15 @@ unsigned int rpmsg_init(
 	struct fw_rsc_vdev_vring *vring_arm_to_pru,
 	unsigned int sys_event_to_arm
 );
+/* Initialize an RPMsg transport for usage.
+ * Needs to be called once per transport (i.e. once per PRU), usually like this:
+ * rpmsg_init(&transport,  // struct to be initialized
+ *     &rproc_resource_table.rpmsg_vring_pru_to_arm,
+ *     &rproc_resource_table.rpmsg_vring_arm_to_pru,
+ *     // ^^ data filled in by kernel, available after PRU boots
+ *     INTERRUPT_PRU_VRING  // define in the device tree, or in <linux/pru.h>
+ * );
+ */
 
 unsigned int rpmsg_channel(
 	enum rpmsg_ns_flags     flags,
@@ -68,6 +77,17 @@ unsigned int rpmsg_channel(
 	char                    *desc,
 	unsigned int            port
 );
+/* Register a channel of communication
+ * name must match the name of the driver on the linux-side of the channel.
+ * Set to "rpmsg-pru" to use the /dev/rpmsg_pruN interface.
+ * port is an arbitrary port number for this channel. Multiple channels can
+ * be registered on the same transport, using separate ports to differentiate.
+ * When using the "rpmsg-pru" driver, the port maps to number in the device
+ * name, and messages to different devices will have the corresponding port
+ * as dst-field.
+ * Note that messages for different ports are sent interleaved, and not queueed
+ * individually.
+ */
 
 unsigned int rpmsg_send (
 	struct rpmsg_transport  *transport,
