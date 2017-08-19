@@ -15,7 +15,6 @@
 #include "resource_table.h"
 
 #define CHAN_NAME "rpmsg-pru"   // needs to match driver on Linux side
-#define CHAN_NUM 0
 
 struct rpmsg_transport transport;
 
@@ -226,10 +225,11 @@ int main() {
 	rpmsg_init(&transport,
 		&rproc_resource_table.rpmsg_vring_pru_to_arm,
 		&rproc_resource_table.rpmsg_vring_arm_to_pru,
-		INTERRUPT_PRU0_VRING
+		INTERRUPT_PRU_VRING
 	);
 
-	while( rpmsg_channel(RPMSG_NS_CREATE, &transport, CHAN_NAME, "environment sensors", CHAN_NUM) != RPMSG_SUCCESS ) {}
+	while( rpmsg_channel(RPMSG_NS_CREATE, &transport, CHAN_NAME,
+	                     "environment sensors", 10*PRU_NUMBER) != RPMSG_SUCCESS ) {}
 
 	// Main event loop
 	while(1) {
