@@ -26,8 +26,8 @@ struct my_resource_table {
 
 struct ch_map pru_intc_map[] = {
 	// { <system interrupt>, <channel> }
-	{INTERRUPT_PRU0_VRING, 2},
-	{INTERRUPT_PRU0_KICK,  0},
+	{INTERRUPT_PRU_VRING, 2},
+	{INTERRUPT_PRU_KICK,  0},
 };
 
 #if !defined(__GNUC__)

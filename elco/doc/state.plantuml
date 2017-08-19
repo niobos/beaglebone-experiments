@@ -8,7 +8,7 @@ state HoldOff
 
 state Rx {
 	state RxStartBit <<Once>>
-	RxStartBit : arm timer for 0.5+N*1 bit times
+	RxStartBit : start timer for 0.5 bit times
 	RxStartBit --> RxWaitForNextBit
 
 	RxWaitForNextBit : monitor timer
@@ -16,12 +16,14 @@ state Rx {
 
 	state RxBit <<Once>>
 	RxBit : receive 1+8+1+1 bits
+	RxBit : extend timer with 1 bit time
 	RxBit --> RxByte : 11 bits received
 	RxBit --> RxWaitForNextBit : < 11 bits received
 
 	state RxByte <<Once>>
 	RxByte : Check startbit, parity, stopbit
-	RxByte --> StartHoldOff
+	RxByte --> RxInvalidFraming : framing error
+	RxByte --> StartHoldOff : framing OK
 
 	state RxInvalidFraming <<Once>>
 	RxInvalidFraming : reset Rx buffer
@@ -29,53 +31,51 @@ state Rx {
 }
 
 state Tx {
-	state TxStart <<Once>>
-	TxStart : arm timer for 0.5+N*0.5 bit times
-	TxStart --> TxBit
+	state TxNextBit <<Once>>
+	TxNextBit : find next bit to send
+	TxNextBit --> TxBit : bits remaining
+	TxNextBit --> TxCompleted : all bits sent
 
 	state TxBit <<Once>>
-	TxBit : find next bit to TX
-	TxBit --> TxCompleted : all bits sent
-	TxBit : Set output to bit value
+	TxBit : Tx bit
+	TxBit : start timer for 0.5 bit time
 	TxBit --> TxWaitForHalfBit
 
 	TxWaitForHalfBit : monitor timer
 	TxWaitForHalfBit --> TxMonitorBit : timer expired
 
 	state TxMonitorBit <<Once>>
+	TxMonitorBit : extend timer with 0.5 bit time
 	TxMonitorBit : Verify input == output
 	TxMonitorBit --> TxWaitForFullBit : match
 	TxMonitorBit --> TxArbitrated : mismatch
 
-	state TxArbitrated <<Once>>
-	TxArbitrated: Change timer expire +0.5 bit times
-	TxArbitrated: Change timer interval to 1 bit times
-	TxArbitrated: Copy Tx state to Rx state
-	TxArbitrated: Reset Tx state to restart
-	TxArbitrated --> RxWaitForNextBit : <11 bits received
-	TxArbitrated --> RxByte : 11 bits received\n\
-		(unlikely, we'd be arbitrated on the stopbit)
-
 	TxWaitForFullBit : monitor timer
-	TxWaitForFullBit -u-> TxBit : timer expired
+	TxWaitForFullBit -u-> TxNextBit : timer expired
 
 	state TxCompleted <<Once>>
+	TxCompleted : Tx(Hi-Z)
 	TxCompleted : reset Tx buffer
 	TxCompleted --> StartHoldOff
+
+	state TxArbitrated <<Once>>
+	TxArbitrated: Copy Tx state to Rx state
+	TxArbitrated: Reset Tx state to restart
+	TxArbitrated --> RxBit
 }
 
 ' Idle needs to be defined after the Rx/Tx composite state,
 ' otherwise the StartBitReceived gets rendered outside of the composite state
 
-Idle : Monitor input for low
-Idle --> RxStartBit : Input Low
+Idle : Rx()
+Idle --> RxStartBit : Rx Low
 Idle : Monitor Tx buffer
-Idle --> TxStart : Tx buffer filled
+Idle --> TxNextBit : Tx buffer filled
 Idle : Monitor RpMsg for new messages
 Idle --> Idle : New RpMsg : copy to Tx buffer
 
 state StartHoldOff <<Once>>
-StartHoldOff : arm timer for 10 bit times
+StartHoldOff : start timer for 10 bit times
 StartHoldOff --> HoldOff
 
 HoldOff : Monitor input for low
