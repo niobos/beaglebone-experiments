@@ -39,6 +39,9 @@ struct DHT22 {
 } DHT22[NUM_SENSORS];
 
 unsigned int map_gpio(unsigned int output) {
+    /* Maps output number to GPIO bit mask.
+     * Returns 0 on error.
+     */
 	switch(output) {
 		case 0: return 1<<2;
 		case 1: return 1<<3;
@@ -66,6 +69,12 @@ unsigned int read_input(unsigned int input) {
 }
 
 void store_next_bit(unsigned int *pointer, void *buf, unsigned int bit_value) {
+    /* Store the bit `bit_value` (which should be either 0 or 1) in the buffer
+     * pointed to by `*buf` at position specified by the opaque value pointed
+     * to by `*pointer`. A `*pointer` value of 0 writes the most significant bit
+     * of the first byte (i.e. big-endian).
+     * `*pointer` will be incremented after this operation.
+     */
 	unsigned int b;
 	asm volatile ( // volatile: this block has side effects (changing *buf)
 		"MOV %[b].b1, %[p].b0\n\t"
@@ -105,41 +114,41 @@ void do_measurements() {
 			switch( DHT22[i].state ) {
 			case DHT22_SendStart:
 				write_low(i);
-				DHT22[i].timer = time_get() + CPU_FREQ / 1000000 * 500;
+				DHT22[i].timer = time_get() + CPU_FREQ / 1000000 * 500;  // 500us
 				DHT22[i].state = DHT22_WaitForStartEnd;
 				break;
 
 			case DHT22_WaitForStartEnd:
 				if( time_ge(time_get(), DHT22[i].timer) ) {
 					write_hiz(i);
-					DHT22[i].timer = time_get() + CPU_FREQ / 1000000 * (40+4);
+					DHT22[i].timer = time_get() + CPU_FREQ / 1000000 * (40+4);  // 40us + 10%
 					DHT22[i].state = DHT22_WaitForSensorResponse;
 				}
 				break;
 
 			case DHT22_WaitForSensorResponse:
 				if( time_ge(time_get(), DHT22[i].timer) ) {
-					DHT22[i].state |= 0x80;
+					DHT22[i].state |= 0x80;  // Go to failure state
 				}
 				if( read_input(i) == 0 ) {
-					DHT22[i].timer = time_get() + CPU_FREQ / 1000000 * (80+8);
+					DHT22[i].timer = time_get() + CPU_FREQ / 1000000 * (80+8);  // 80us + 10%
 					DHT22[i].state = DHT22_WaitForSensorResponseEnd;
 				}
 				break;
 
 			case DHT22_WaitForSensorResponseEnd:
 				if( time_ge(time_get(), DHT22[i].timer) ) {
-					DHT22[i].state |= 0x80;
+					DHT22[i].state |= 0x80;  // Go to failure state
 				}
 				if( read_input(i) == 1 ) {
-					DHT22[i].timer = time_get() + CPU_FREQ / 1000000 * (80+8);
+					DHT22[i].timer = time_get() + CPU_FREQ / 1000000 * (80+8);  // 80us + 10%
 					DHT22[i].state = DHT22_WaitForBit;
 				}
 				break;
 
 			case DHT22_WaitForBit:
 				if( time_ge(time_get(), DHT22[i].timer) ) {
-					DHT22[i].state |= 0x80;
+					DHT22[i].state |= 0x80;  // Go to failure state
 				}
 				if( read_input(i) == 0 ) {
 					DHT22[i].state = DHT22_BitStart;
@@ -153,13 +162,13 @@ void do_measurements() {
 
 			case DHT22_WaitForBitRelease:
 				if( time_ge(time_get(), DHT22[i].timer) ) {
-					DHT22[i].state |= 0x80;
+					DHT22[i].state |= 0x80;  // Go to failure state
 				}
 				if( read_input(i) == 1 ) {
 					if( DHT22[i].rx_bit >= 0x0500 ) {
 						DHT22[i].state = DHT22_Done;
 					} else {
-						DHT22[i].timer = time_get() + CPU_FREQ / 1000000 * 50; // 50µs is decission point between "0" and "1"
+						DHT22[i].timer = time_get() + CPU_FREQ / 1000000 * 50; // 50µs is decision point between "0" and "1"
 						DHT22[i].state = DHT22_ReadBit0;
 					}
 				}
@@ -178,7 +187,7 @@ void do_measurements() {
 
 			case DHT22_ReadBit1:
 				if( time_ge(time_get(), DHT22[i].timer) ) {
-					DHT22[i].state |= 0x80;
+					DHT22[i].state |= 0x80;  // Go to failure state
 				}
 				if( read_input(i) == 0 ) {
 					store_next_bit(&DHT22[i].rx_bit, payload + i*5, 1);
@@ -196,7 +205,7 @@ void do_measurements() {
 				/* Checksum is guaranteed to fail:
 				 * rx_bit&0xff is <=7; rx_bit>>8 is <= 4
 				 * state is < 0x8a
-				 * Also: humidity of more than 6528.0% should rise suspision
+				 * Also: humidity of more than 6528.0% should rise suspicion
 				 */
 				DHT22[i].state = DHT22_Done;
 				// fall through

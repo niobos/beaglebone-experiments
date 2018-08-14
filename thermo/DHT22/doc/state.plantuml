@@ -2,6 +2,8 @@
 
 skinparam stateBackgroundColor<<Once>> #ADD1B2
 
+[*] --> SendStart
+
 state SendStart <<Once>>
 SendStart : Tx(low)
 SendStart : arm timer for 500µs
@@ -75,5 +77,8 @@ RxBit0 --> BitStart
 state RxBit1 <<Once>>
 RxBit1 : store bit value "1"
 RxBit1 --> BitStart
+
+Success --> [*]
+Failed --> [*]
 
 @enduml
