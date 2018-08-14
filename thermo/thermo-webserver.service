@@ -1,0 +1,8 @@
+[Unit]
+Description=Thermo sensor web server
+
+[Service]
+ExecStart=/opt/src/thermo/start_webserver.sh
+
+[Install]
+WantedBy=multi-user.target
