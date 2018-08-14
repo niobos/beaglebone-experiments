@@ -2,9 +2,9 @@
 
 skinparam stateBackgroundColor<<Once>> #ADD1B2
 
+state HoldOff
 state Idle
 state StartHoldOff
-state HoldOff
 
 state Rx {
 	state RxStartBit <<Once>>
@@ -22,15 +22,16 @@ state Rx {
 
 	state RxByte <<Once>>
 	RxByte : Check startbit, parity, stopbit
-	RxByte --> RxInvalidFraming : framing error
-	RxByte --> StartHoldOff : framing OK
-
-	state RxInvalidFraming <<Once>>
-	RxInvalidFraming : reset Rx buffer
-	RxInvalidFraming --> StartHoldOff
+	RxByte : if framing OK: store byte
+	RxByte --> StartHoldOff
 }
 
 state Tx {
+    state TxStart <<Once>>
+    TxStart : set Tx bit counter to start-bit of first byte
+    TxStart : start timer
+    TxStart --> TxBit
+
 	state TxNextBit <<Once>>
 	TxNextBit : find next bit to send
 	TxNextBit --> TxBit : bits remaining
@@ -38,7 +39,7 @@ state Tx {
 
 	state TxBit <<Once>>
 	TxBit : Tx bit
-	TxBit : start timer for 0.5 bit time
+	TxBit : extend timer with 0.5 bit time
 	TxBit --> TxWaitForHalfBit
 
 	TxWaitForHalfBit : monitor timer
@@ -56,7 +57,7 @@ state Tx {
 	state TxCompleted <<Once>>
 	TxCompleted : Tx(Hi-Z)
 	TxCompleted : reset Tx buffer
-	TxCompleted --> StartHoldOff
+	TxCompleted -u-> StartHoldOff
 
 	state TxArbitrated <<Once>>
 	TxArbitrated: Copy Tx state to Rx state
@@ -64,27 +65,29 @@ state Tx {
 	TxArbitrated --> RxBit
 }
 
-' Idle needs to be defined after the Rx/Tx composite state,
-' otherwise the StartBitReceived gets rendered outside of the composite state
+' HoldOff/Idle needs to be defined after the Rx/Tx composite state,
+' otherwise the RxStartBit gets rendered outside of the composite state
 
-Idle : Rx()
-Idle --> RxStartBit : Rx Low
-Idle : Monitor Tx buffer
-Idle --> TxNextBit : Tx buffer filled
-Idle : Monitor RpMsg for new messages
-Idle --> Idle : New RpMsg : copy to Tx buffer
+[*] --> StartHoldOff
 
 state StartHoldOff <<Once>>
-StartHoldOff : start timer for 10 bit times
+StartHoldOff : start timer for 11 bit times
 StartHoldOff --> HoldOff
 
 HoldOff : Monitor input for low
-HoldOff --> RxStartBit : Input Low
+HoldOff --> RxStartBit : Rx=Low/1
 HoldOff : Monitor timer
 HoldOff --> EndOfMessage : timer expired
 
+Idle : Rx()
+Idle --> RxStartBit : Rx=Low/1
+Idle : Monitor Tx buffer
+Idle --> TxStart : Tx buffer filled
+Idle : Monitor RpMsg for new messages
+Idle --> Idle : New RpMsg : copy to Tx buffer
+
 state EndOfMessage <<Once>>
-EndOfMessage : if Rx buffer: send & reset Rx buffer to ARM
-EndOfMessage -u-> Idle
+EndOfMessage : if Rx buffer: send Rx buffer to ARM & reset buffer
+EndOfMessage --> Idle
 
 @enduml

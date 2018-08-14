@@ -32,7 +32,11 @@ uint8_t payload[RPMSG_BUF_SIZE];
 
 struct owuart_state { // one-wire uart
 	enum {
-		OW_Idle = 0,
+		OW_StartHoldOff = 0,
+		OW_HoldOff,
+		OW_EndOfMessage,
+		OW_Idle,
+		OW_TxStart,
 		OW_TxNextBit,
 		OW_TxBit,
 		OW_TxWaitForHalfBit,
@@ -44,10 +48,7 @@ struct owuart_state { // one-wire uart
 		OW_RxWaitForNextBit,
 		OW_RxBit,
 		OW_RxByte,
-		OW_RxInvalidFraming,
-		OW_StartHoldOff,
-		OW_HoldOff,
-		OW_EndOfMessage
+		OW_RxInvalidFraming
 	} state;
 	unsigned int timer;
 
@@ -60,9 +61,14 @@ struct owuart_state { // one-wire uart
 } owuart;
 
 unsigned int read() {
+	/* Read voltage of line
+	 * return 1 for 0V, 0 for 12V
+	 */
 	return (GPIO1.DATAIN & (1<<14)) >> 14;
 }
 void write(unsigned int b) {
+    /* Pull line down for 1, release line for 0
+     */
 	if( b ) GPIO1.SETDATAOUT = 1<<15;
 	else GPIO1.CLEARDATAOUT = 1<<15;
 }
@@ -89,6 +95,35 @@ unsigned int parity(unsigned int data) { // Assume 1 byte of data
 
 void process_tick() {
 	switch(owuart.state) {
+    case OW_StartHoldOff:
+        owuart.timer = time_get() + CPU_FREQ / BIT_RATE * 11; // wait 1 full character
+        owuart.state = OW_HoldOff;
+        return;
+
+    case OW_HoldOff:
+        if( read() == 1 ) {
+            owuart.state = OW_RxStartBit;
+        } else if( time_ge(time_get(), owuart.timer) ) {
+            owuart.state = OW_EndOfMessage;
+        }
+        return;
+
+    case OW_EndOfMessage: {
+        unsigned int nbytes;
+        asm("MOV %[byte], %[rx_bit].b1\n\t"  // How many bytes did we receive?
+            "LDI %[rx_bit].w0, 0\n\t"  // Reset byte counter
+            : [byte] "=r" (nbytes),
+              [rx_bit] "+r" (owuart.rx_bit)
+        );
+        if( nbytes ) {
+            rpmsg_send(&transport, MAIN_CHAN_NUM, rpmsg_src,
+                       owuart.rx_buffer, nbytes);
+            owuart.c_rx++;
+        }
+        owuart.state = OW_Idle;
+        return;
+    }
+
 	case OW_Idle: {
 		if( read() == 1 ) {
 			owuart.state = OW_RxStartBit;
@@ -96,8 +131,7 @@ void process_tick() {
 		}
 
 		if( owuart.tx_buffer_len ) {
-			owuart.tx_bit = 0x00fe;  // the bit before the first start bit
-			owuart.state = OW_TxNextBit;
+			owuart.state = OW_TxStart;
 			return;
 		}
 
@@ -110,49 +144,33 @@ void process_tick() {
 				owuart.tx_buffer_len = len;
 				// remain in idle state, will catch this on next tick;
 			} else if( dst == AUX_CHAN_NUM ) {
+				// send report: 4 counters & 2 state fields
 				rpmsg_send(&transport, AUX_CHAN_NUM, src,
-				           &owuart.c_tx, 4*4);
+				           &owuart.c_tx, (4+2)*4);
 			}
 		}
 
 		return;
 	}
 
-	case OW_TxNextBit: {
-		unsigned int byte;
-		asm(/* Use tx_bit as bit-struct:
-			 * bits 15-8: byte to sent
-			 * bits 7-0 : bit to sent
-			 *            0xff: start bit
-			 *            0-7: data bit
-			 *            8- stop bit(s)
-			 * bit 24: bit to Tx (to compare with Rx)
-			 */
-			"ADD %[tx_bit].b0, %[tx_bit].b0, 1\n\t"
-
-			"QBNE within_byte, %[tx_bit].b0, %[nbits]\n\t"
-			// next byte
-			"ADD %[tx_bit].b1, %[tx_bit].b1, 1\n\t"
-			"LDI %[tx_bit].b0, 0xff\n\t"
-
-			"within_byte:\n\t"
-			"MOV %[byte], %[tx_bit].b1\n\t"
-		 	: /* outputs */ [tx_bit] "+r" (owuart.tx_bit), [byte] "=r" (byte)
-			: /* inputs */ [nbits] "i" (8+1+1+1) // databits + parity + stop bit + 1
-			: /* clobber */
-		);
-		if( byte >= owuart.tx_buffer_len) owuart.state = OW_TxCompleted;
-		else owuart.state = OW_TxBit;
+	case OW_TxStart:
+		/* Use tx_bit as bit-struct:
+		 * bits 15-8: byte to sent
+		 * bits 7-0 : bit to sent
+		 *            0xff: start bit
+		 *            0-7: data bit
+		 *            8- stop bit(s)
+		 * bit 24: bit to Tx (to compare with Rx)
+		 */
+		owuart.tx_bit = 0x00ff;
 		owuart.timer = time_get();
-		return;
-	}
+		owuart.state = OW_TxBit;
 
 	case OW_TxBit: {
 		unsigned int bit_to_tx, bitnum_to_tx;
-		// Load byte to transmit
 		asm(
-			"LBBO %[bit_to_tx], %[buf], %[tx_bit].b1, 1\n\t"
-			"MOV %[bitnum_to_tx], %[tx_bit].b0\n\t"
+			"LBBO %[bit_to_tx], %[buf], %[tx_bit].b1, 1\n\t" // Load byte to transmit
+			"MOV %[bitnum_to_tx], %[tx_bit].b0\n\t"  // Extract number of bit to transmit
 			: /* outputs */
 				[bit_to_tx] "=r" (bit_to_tx),
 				[bitnum_to_tx] "=r" (bitnum_to_tx),
@@ -166,7 +184,7 @@ void process_tick() {
 			// Tx start bit
 			bit_to_tx = START_BIT_VALUE;
 		} else if( bitnum_to_tx < 8 ) {
-			// Tx data bits
+			// Tx data bits. Bits are sent least significant bit first
 			bit_to_tx >>= bitnum_to_tx;
 			bit_to_tx &= 0x01;
 		} else if( bitnum_to_tx == 8 ) {
@@ -177,7 +195,7 @@ void process_tick() {
 		write(bit_to_tx);
 
 		asm(
-			"MOV %[tx_bit].b3, %[bit_to_tx].b0\n\t"
+			"MOV %[tx_bit].b3, %[bit_to_tx].b0\n\t"  // Store transmitted bit for later comparison
 			: /* outputs */
 				[tx_bit] "+r" (owuart.tx_bit)
 			: /* inputs */
@@ -196,12 +214,13 @@ void process_tick() {
 
 	case OW_TxMonitorBit: {
 		unsigned int bit;
-		asm("MOV %[bit], %[tx_bit].b3\n\t"
+		asm("MOV %[bit], %[tx_bit].b3\n\t"  // Get transmitted bit
 			: /* outputs */ [bit] "=r" (bit)
 			: /* inputs */  [tx_bit] "r" (owuart.tx_bit)
 			: /* clobber */
 		);
 		if( read() == bit ) {
+			// Bit transmitted successfully
 			owuart.state = OW_TxWaitForFullBit;
 		} else {
 			owuart.state = OW_TxArbitrated;
@@ -213,6 +232,25 @@ void process_tick() {
 	case OW_TxWaitForFullBit:
 		if( time_ge(time_get(), owuart.timer) ) owuart.state = OW_TxNextBit;
 		return;
+
+    case OW_TxNextBit: {
+        unsigned int byte;
+        asm("ADD %[tx_bit].b0, %[tx_bit].b0, 1\n\t"  // Increment bit counter
+
+            "QBNE within_byte, %[tx_bit].b0, %[nbits]\n\t"  // Overflow to next byte
+            "ADD %[tx_bit].b1, %[tx_bit].b1, 1\n\t"  // Next byte
+            "LDI %[tx_bit].b0, 0xff\n\t"  // Reset bit counter to start bit
+
+            "within_byte:\n\t"
+            "MOV %[byte], %[tx_bit].b1\n\t"  // export byte number
+            : /* outputs */ [tx_bit] "+r" (owuart.tx_bit), [byte] "=r" (byte)
+            : /* inputs */ [nbits] "i" (8+1+1+1) // databits + parity + stop bit + 1
+            : /* clobber */
+        );
+        if( byte >= owuart.tx_buffer_len) owuart.state = OW_TxCompleted;
+        else owuart.state = OW_TxBit;
+        return;
+    }
 
 	case OW_TxArbitrated: {
 		// Someone else was sending on the bus while we were as well
@@ -227,12 +265,25 @@ void process_tick() {
 		//   Ignore this case and copy over everything as well. Hopefully
 		//   the parity and/or CRC will cover this
 
-		write(0); // set Hi-Z
+		write(0);  // set Hi-Z
 		owuart.c_arbitrated++;
 
-		// Get current tx byte
 		unsigned int byte;
-		asm(
+		asm( // How many bytes did we already send completely?
+			"MOV %[byte], %[tx_bit].b1\n\t"
+			: /* outputs */
+				[byte] "=r" (byte)
+			: /* inputs */
+				[tx_bit] "r" (owuart.tx_bit),
+			: /* clobber */
+		);
+		// Copy over the bytes we already sent to the RX buffer
+		memcpy(owuart.rx_buffer, owuart.tx_buffer, byte);
+
+
+        // Copy over the current (partial) byte, and sync up RX state
+
+		asm( // Get current tx byte
 			"LBBO %[byte], %[tx_buf], %[tx_bit].b1, 1\n\t"  // load Tx byte
 			: /* outputs */
 				[byte] "=r" (byte)
@@ -242,7 +293,7 @@ void process_tick() {
 			: /* clobber */
 		);
 
-		asm(//fill in Rx bit buffer with constructed bits
+		asm( //fill in Rx bit buffer with the current byte
 			"MOV %[rx_bit].w2, %[v]\n\t"
 			: /* outputs */
 				[rx_bit] "+r" (owuart.rx_bit)
@@ -254,16 +305,22 @@ void process_tick() {
 					START_BIT_VALUE << 5)
 		);
 
-		asm(// Now shift away bits still to be received
-			// tx bit 0 is the 0th data bit (start bit is 0xff)
-			// tx bit 9 is stop bit
-			"RSB %[num_bytes], %[tx_bit].b0, 10\n\t"  // 10-tx_bit
+		asm(/* Now shift away bits still to be received
+			 * tx bit 0 is the 0th data bit (start bit is 0xff)
+			 * tx bit 9 is stop bit
+			 *
+			 * Note: we will never be arbitrated on the start bit. Start bit is active low,
+			 * which will always match.
+			 */
+			"RSB %[num_bytes], %[tx_bit].b0, 10\n\t"  // num_bytes = 10 - tx_bit
 			"LSL %[rx_bit].w2, %[rx_bit].w2, %[num_bytes]\n\t"
+			/* rx_bit.w2 now contains, left-aligned, all bits we already transmitted
+			 * the currently transmitted (but arbitrated, mismatched) bit is not included
+			 */
 
 			// Copy over tx_state in to rx_state
 			"ADD %[rx_bit].b0, %[tx_bit].b0, 1\n\t" // rx counts start-bit as bit0, tx as bit 0xff
-			"MOV %[rx_bit].b1, %[tx_bit].b1\n\t"
-			"MOV %[num_bytes], %[rx_bit].b1\n\t"
+			"MOV %[rx_bit].b1, %[tx_bit].b1\n\t"  // copy byte counter
 			: /* outputs */
 				[rx_bit] "+r" (owuart.rx_bit),
 				[num_bytes] "=r" (byte)
@@ -271,16 +328,23 @@ void process_tick() {
 				[tx_bit] "r" (owuart.tx_bit)
 			: /* clobber */
 		);
-		memcpy(owuart.rx_buffer, owuart.tx_buffer, byte);
-		owuart.state = OW_RxBit;
+
+		/* Reset Tx state
+		 * TODO: Should we retransmit the whole message? Or just the arbitrated byte?
+		 */
+		owuart.tx_bit = 0x00ff;  // Restart sending start bit of first byte of message
+
+		owuart.state = OW_RxBit;  // Switch to Rx state to read in current bit value
 		return;
 	}
 
 	case OW_TxCompleted:
+	    // Loop back transmitted message
 		rpmsg_send(&transport, MAIN_CHAN_NUM, rpmsg_src,
 		           owuart.tx_buffer, owuart.tx_buffer_len);
-		write(0); // To be sure. Stop-bit should have already done this
-		owuart.tx_buffer_len = 0;
+
+		write(0);  // To be sure. Stop-bit should have already done this
+		owuart.tx_buffer_len = 0;  // Mark Tx as done
 		owuart.state = OW_StartHoldOff;
 		owuart.c_tx++;
 		return;
@@ -301,11 +365,16 @@ void process_tick() {
 			 * bits 15-8: byte
 			 * bits 7-0: bit
 			 */
+			/* Bits are sent least significant bit first.
+			 * Shift w2 right by 1 bit, store new bit in bit 31
+			 */
 			"LSR %[rx_bit].w2, %[rx_bit].w2, 1\n\t"
 			"QBNE not_one, %[in], 1\n\t"
 			"SET %[rx_bit], %[rx_bit], 31\n\t"
 			"not_one:\n\t"
 
+			/* Increment bit counter (bits 7-0), and export as integer
+			 */
 			"ADD %[rx_bit].b0, %[rx_bit].b0, 1\n\t"
 			"MOV %[bit], %[rx_bit].b0\n\t"
 			: /* outputs */ [rx_bit] "+r" (owuart.rx_bit),
@@ -324,12 +393,16 @@ void process_tick() {
 
 	case OW_RxByte: {
 		unsigned int framing_ok, byte, byte_num;
-		/* Verify framing:  spddddddddS
-		 *                  ^31       ^21*/
+		/* Verify framing:  spdddddd ddS_____
+		 *                  ^31    23^ ^21  ^16 */
 		framing_ok = 1;
 		if( (owuart.rx_bit & 0x00200000) != (START_BIT_VALUE<<21) ) framing_ok = 0;
 		else if( (owuart.rx_bit & 0x80000000) != (STOP_BIT_VALUE<<31) ) framing_ok = 0;
 
+		/* Move bits to:   ______sp dddddddd
+		 *                 ^31  24^ ^23    ^16
+		 * Extract data & parity bit
+		 */
 		asm("LSR %[rx_bit].w2, %[rx_bit].w2, 6\n\t"
 			"MOV %[byte], %[rx_bit].b2\n\t"
 			// Parity is in rx_bit & 0x01000000
@@ -342,6 +415,8 @@ void process_tick() {
 
 		if( (owuart.rx_bit & 0x01000000)>>24 != parity(byte) ) framing_ok = 0;
 
+		/* Reset bit counter to 0
+		 */
 		asm("LDI %[rx_bit].b0, 0\n\t"
 			: /* output */
 				[rx_bit] "+r" (owuart.rx_bit)
@@ -351,51 +426,28 @@ void process_tick() {
 			// move to next byte
 			asm("MOV %[byte_num], %[rx_bit].b1\n\t"
 				"ADD %[rx_bit].b1, %[rx_bit].b1, 1\n\t"
-				: [rx_bit] "+r" (owuart.rx_bit),
-				  [byte_num] "=r" (byte_num)
+				: /* output */
+					[rx_bit] "+r" (owuart.rx_bit),
+					[byte_num] "=r" (byte_num)
 			);
 			owuart.rx_buffer[byte_num] = byte;
-			owuart.state = OW_StartHoldOff;
 		} else {
-			owuart.state = OW_StartHoldOff;
 			owuart.c_framing_error++;
 		}
-		return;
-	}
-
-	case OW_StartHoldOff:
-		owuart.timer = time_get() + CPU_FREQ / BIT_RATE * 11; // wait 1 full character
-		owuart.state = OW_HoldOff;
-		return;
-
-	case OW_HoldOff:
-		if( read() == 1 ) {
-			owuart.state = OW_RxStartBit;
-		} else if( time_ge(time_get(), owuart.timer) ) {
-			owuart.state = OW_EndOfMessage;
-		}
-		return;
-
-	case OW_EndOfMessage: {
-		unsigned int nbytes;
-		asm("MOV %[byte], %[rx_bit].b1\n\t"
-			"LDI %[rx_bit].w0, 0\n\t"
-			: [byte] "=r" (nbytes),
-			  [rx_bit] "+r" (owuart.rx_bit)
-		);
-		if( nbytes ) {
-			rpmsg_send(&transport, MAIN_CHAN_NUM, rpmsg_src,
-			           owuart.rx_buffer, nbytes);
-			owuart.c_rx++;
-		}
-		owuart.state = OW_Idle;
+        owuart.state = OW_StartHoldOff;
 		return;
 	}
 
 	default:
-		// TODO: handle error?
-		write(0);
-		owuart.state = OW_StartHoldOff;
+		write(0);  // Release bus
+		rpmsg_send(&transport, AUX_CHAN_NUM, src,
+        		   &owuart.c_tx, (4+2)*4);
+        while(1);  // hang
+
+		// TODO: try to recover?
+		owuart_state.rx_bit = 0;  // Reset RX state
+		owuart_state.tx_buffer_len = 0;  // Drop Tx message (if any)
+		owuart.state = OW_StartHoldOff;  // let's try to sync up state
 		return;
 	}
 }
