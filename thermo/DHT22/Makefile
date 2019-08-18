@@ -1,3 +1,6 @@
+all: 0.elf overlay.dtbo
+
+
 %.0.elf: %.S
 	pru-gcc -g -Os -Wall -Wextra -minrt -mmcu=am335x.pru0 -nostdlib -nodefaultlibs -nostartfiles $< -o $@
 
@@ -13,8 +16,8 @@
 %.1.elf: %.c
 	pru-gcc -g -Os -Wall -Wextra -minrt -mmcu=am335x.pru1 -I include $< -o $@
 
-0.elf: main.c ../lib/rpmsg/rpmsg.c ../lib/time/time.c
-	pru-gcc -g -Os -Wall -Wextra -minrt -mmcu=am335x.pru0 -DNUMBER_OF_TIMERS=4 -I ../include $+ -o $@
+0.elf: main.c ../../lib/rpmsg/rpmsg.c ../../lib/time/time.c
+	pru-gcc -g -Os -Wall -Wextra -minrt -mmcu=am335x.pru0 -DNUMBER_OF_TIMERS=4 -I ../../include $+ -o $@
 
-%-00A0.dtbo: %.dts
+%.dtbo: %.dts
 	dtc -O dtb -o "$@" -b 0 -@ "$<"

@@ -4,6 +4,7 @@
 #include <am335x/gpio.h>
 #include <linux/pru.h>
 #include <linux/virtio_config.h>
+#include <pru/id.h>
 #include <pru/io.h>
 #include <pru/ctrl.h>
 
